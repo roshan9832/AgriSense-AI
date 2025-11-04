@@ -1,7 +1,9 @@
+
 import React, { useState } from 'react';
 import ToggleSwitch from './ToggleSwitch';
 import InteractiveMap from './InteractiveMap';
 import { WaterSourceIcon, WeatherStationIcon } from './Icons';
+import Button from './common/Button';
 
 interface MapLegendProps {
     showNdvi: boolean;
@@ -93,9 +95,9 @@ const FarmMap: React.FC = () => {
                  </div>
             </div>
             
-            <button className="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-lg shadow-md hover:bg-green-700 transition-all duration-200 active:scale-95">
+            <Button variant="primary" size="md" className="w-full">
                 खेत की बानबन्दी बमोमें
-            </button>
+            </Button>
         </div>
     );
 };

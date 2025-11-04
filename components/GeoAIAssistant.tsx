@@ -3,6 +3,8 @@ import { GoogleGenAI, Type } from "@google/genai";
 import {
     UserIcon, CameraIcon, MicIcon, InfoIcon, SendIcon, RefreshIcon,
 } from './Icons';
+import Button from './common/Button';
+import IconButton from './common/IconButton';
 
 // Fix for SpeechRecognition API types which are not included in standard TypeScript libs.
 interface SpeechRecognition extends EventTarget {
@@ -274,18 +276,80 @@ const GeoAIAssistant: React.FC = () => {
         }
         setIsChatLoading(true);
 
-        setTimeout(() => {
-            const newModelMessage: ChatMessage = {
+        try {
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            
+            const prompt = `You are an AI Geo Assistant for farmers. Answer the user's question. If the answer involves data that can be visualized as a bar chart (like a forecast over several days), you MUST include a special JSON block in your response. The JSON block must start with "CHART_JSON:" and be a valid JSON object with the keys: "title" (string), "subtitle" (string), "labels" (an array of strings), and "data" (an array of numbers). Your main text answer should come before this block. Do not include the JSON block if a chart is not relevant.
+
+User's question: "${textToSend}"`;
+        
+            const response = await ai.models.generateContent({
+                model: "gemini-2.5-flash",
+                contents: prompt,
+            });
+        
+            const responseText = response.text;
+            
+            const content: MessageContent[] = [];
+            let newModelMessage: ChatMessage;
+        
+            const chartJsonMarker = 'CHART_JSON:';
+            const chartJsonIndex = responseText.indexOf(chartJsonMarker);
+        
+            if (chartJsonIndex !== -1) {
+                const textPart = responseText.substring(0, chartJsonIndex).trim();
+                const jsonString = responseText.substring(chartJsonIndex + chartJsonMarker.length);
+                
+                try {
+                    const chartData = JSON.parse(jsonString);
+                    // Ensure the essential chart data properties exist
+                    if (chartData.title && chartData.subtitle && Array.isArray(chartData.labels) && Array.isArray(chartData.data)) {
+                        if (textPart) {
+                            content.push({ type: 'text', value: textPart });
+                        }
+                        content.push({
+                            type: 'barchart',
+                            title: chartData.title,
+                            subtitle: chartData.subtitle,
+                            labels: chartData.labels,
+                            data: chartData.data,
+                        });
+                    } else {
+                         // Parsed JSON is not in the correct format
+                        throw new Error("Parsed JSON for chart is missing required properties.");
+                    }
+                } catch (e) {
+                    console.error("Failed to parse chart JSON from model response:", e);
+                    // Fallback to just showing the raw text if JSON is malformed
+                    content.push({ type: 'text', value: responseText });
+                }
+            } else {
+                // No chart data, just a text response
+                content.push({ type: 'text', value: responseText });
+            }
+        
+            newModelMessage = {
                 id: Date.now() + 1,
                 role: 'model',
-                content: [{ type: 'text', value: `I received your message: "${textToSend}". As a demo, I can't generate a live response, but in a real application, I would connect to the Gemini API to provide a data-rich answer with visualizations.` }]
+                content: content
             };
+        
             setChatMessages(prev => [...prev, newModelMessage]);
+        
+        } catch (error) {
+            console.error("Error calling Gemini API:", error);
+            const errorMessage: ChatMessage = {
+                id: Date.now() + 1,
+                role: 'model',
+                content: [{ type: 'text', value: "Sorry, I'm having trouble connecting to the AI. Please try again later." }]
+            };
+            setChatMessages(prev => [...prev, errorMessage]);
+        } finally {
             setIsChatLoading(false);
-        }, 1500);
+        }
     };
 
-    const handleCameraClick = () => {
+    const handleUploadClick = () => {
         fileInputRef.current?.click();
     };
 
@@ -327,9 +391,9 @@ const GeoAIAssistant: React.FC = () => {
                 <div className="flex items-center justify-between mb-3">
                     <h2 className="font-bold text-lg text-gray-900 dark:text-white">AI Geo Assistant</h2>
                     <div className="flex items-center space-x-2">
-                        <button className="p-1 rounded-full text-gray-500 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-800 transition-colors duration-200">
+                        <IconButton variant="subtle" size="sm">
                             <UserIcon className="w-6 h-6" />
-                        </button>
+                        </IconButton>
                     </div>
                 </div>
                 <div className="text-xs text-center text-gray-600 dark:text-gray-400 bg-gray-300 dark:bg-gray-800/50 p-2 rounded-lg flex items-center justify-center space-x-2">
@@ -348,9 +412,9 @@ const GeoAIAssistant: React.FC = () => {
                             </>
                         )}
                     </div>
-                    <button onClick={handleFetchWeather} disabled={isFetchingWeather} className="p-1 text-gray-500 dark:text-gray-400 hover:bg-gray-400/50 dark:hover:bg-gray-700 rounded-full transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed">
+                    <IconButton onClick={handleFetchWeather} disabled={isFetchingWeather} variant="subtle" size="sm" className="w-6 h-6">
                        <RefreshIcon className={`w-4 h-4 ${isFetchingWeather ? 'animate-spin' : ''}`} />
-                    </button>
+                    </IconButton>
                 </div>
             </header>
             
@@ -380,19 +444,22 @@ const GeoAIAssistant: React.FC = () => {
 
             <footer className="flex-shrink-0 p-4 space-y-3 bg-gray-200 dark:bg-black">
                  <div className="flex items-center flex-wrap gap-2">
-                    <button onClick={handleCameraClick} className="flex-shrink-0 text-xs font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 px-3 py-1.5 rounded-full shadow-sm transition-all duration-200 active:scale-95"><CameraIcon className="w-4 h-4 inline-block -ml-1 mr-1.5" /></button>
-                    
                     {['मंडी रेट बना', 'सिंचाई सुझाव दो', 'मौसम देखो'].map(suggestion => (
-                         <button 
+                         <Button
                             key={suggestion}
                             onClick={() => handleSendMessage(suggestion)}
-                            className="flex-shrink-0 text-xs font-medium bg-lime-200 hover:bg-lime-300 text-lime-900 px-3 py-1.5 rounded-full transition-all duration-200 active:scale-95"
+                            variant="lime"
+                            size="sm"
+                            className="flex-shrink-0 rounded-full !px-3 !py-1.5"
                           >
                             {suggestion}
-                         </button>
+                         </Button>
                     ))}
                 </div>
                 <div className="flex items-center space-x-2">
+                    <IconButton onClick={handleUploadClick} variant="subtle" size="md" aria-label="Upload an image">
+                        <CameraIcon className="w-6 h-6"/>
+                    </IconButton>
                     <div className="relative flex-grow">
                         <InfoIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
                         <input
@@ -400,9 +467,9 @@ const GeoAIAssistant: React.FC = () => {
                             ref={fileInputRef}
                             onChange={handleFileChange}
                             accept="image/*"
-                            capture="environment"
                             className="hidden"
                             aria-hidden="true"
+                            capture="environment"
                         />
                         <input
                             type="text"
@@ -424,14 +491,14 @@ const GeoAIAssistant: React.FC = () => {
                             </button>
                         )}
                     </div>
-                    <button 
-                        onClick={() => handleSendMessage()} 
-                        disabled={isChatLoading || !chatInput.trim()} 
-                        className="bg-green-600 text-white p-2.5 rounded-full hover:bg-green-700 disabled:bg-gray-400 flex-shrink-0 shadow-sm transition-all duration-200 active:scale-95"
+                    <IconButton
+                        onClick={() => handleSendMessage()}
+                        disabled={isChatLoading || !chatInput.trim()}
+                        className="bg-green-600 text-white hover:bg-green-700 disabled:bg-gray-400 flex-shrink-0 shadow-sm"
                         aria-label="Send message"
                     >
                         <SendIcon className="w-5 h-5"/>
-                    </button>
+                    </IconButton>
                 </div>
             </footer>
         </div>

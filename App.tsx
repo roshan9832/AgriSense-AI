@@ -9,6 +9,7 @@ import Profile from './components/Profile';
 import PlaceholderPage from './components/PlaceholderPage';
 import BottomNav from './components/BottomNav';
 import GeoAIAssistant from './components/GeoAIAssistant';
+import IconButton from './components/common/IconButton';
 
 import { AgriSenseLogo, UserIcon as ProfileIcon, HamburgerMenuIcon } from './components/Icons';
 
@@ -46,18 +47,18 @@ const AppHeader: React.FC<{page: Page}> = ({ page }) => {
     return (
         <header className="flex-shrink-0 bg-white dark:bg-gray-800 shadow-sm">
             <div className="flex items-center justify-between h-16 px-4">
-                <button className="p-2 text-gray-600 dark:text-gray-300">
+                <IconButton variant="subtle" size="sm" aria-label="Open menu">
                     <HamburgerMenuIcon className="w-6 h-6" />
-                </button>
+                </IconButton>
                 <div className="flex flex-col items-center">
                    {showLogo && <AgriSenseLogo className="h-7 w-7 text-green-600" />}
                    <h1 className={`font-bold ${showLogo ? 'text-sm' : 'text-lg'} text-gray-800 dark:text-gray-100`}>
                        {showLogo ? 'AgriSense AI' : title}
                    </h1>
                 </div>
-                <button className="p-2 text-gray-600 dark:text-gray-300">
+                <IconButton variant="subtle" size="sm" aria-label="View profile">
                     <ProfileIcon className="w-7 h-7" />
-                </button>
+                </IconButton>
             </div>
         </header>
     );

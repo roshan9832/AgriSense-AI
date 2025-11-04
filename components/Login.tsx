@@ -1,5 +1,7 @@
+
 import React, { useState } from 'react';
 import { AgriSenseLogo } from './Icons';
+import Button from './common/Button';
 
 interface LoginProps {
     onLogin: () => void;
@@ -17,12 +19,12 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
             <div className="w-full max-w-sm space-y-3">
                 <h3 className="font-semibold text-gray-700 dark:text-gray-300">Onboarding/Login Page</h3>
-                <button className="w-full bg-white dark:bg-gray-800 border border-green-300 dark:border-green-700 text-green-800 dark:text-green-200 font-semibold py-3 rounded-lg shadow-sm hover:bg-green-100 dark:hover:bg-green-900/50 transition-all duration-200 active:scale-95">
+                <Button variant="outline" className="w-full bg-white dark:bg-gray-800 border-green-300 dark:border-green-700 text-green-800 dark:text-green-200 font-semibold hover:bg-green-100 dark:hover:bg-green-900/50 shadow-sm" size="md">
                     गुंजर रेसत्ततान (किसान)
-                </button>
-                <button className="w-full bg-white dark:bg-gray-800 border border-green-300 dark:border-green-700 text-green-800 dark:text-green-200 font-semibold py-3 rounded-lg shadow-sm hover:bg-green-100 dark:hover:bg-green-900/50 transition-all duration-200 active:scale-95">
+                </Button>
+                <Button variant="outline" className="w-full bg-white dark:bg-gray-800 border-green-300 dark:border-green-700 text-green-800 dark:text-green-200 font-semibold hover:bg-green-100 dark:hover:bg-green-900/50 shadow-sm" size="md">
                     गुंजर रेसत्ततान (शोधकर्ता / गयरी)
-                </button>
+                </Button>
             </div>
 
             <div className="w-full max-w-sm mt-6 space-y-4">
@@ -42,12 +44,12 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
             </div>
 
             <div className="w-full max-w-sm mt-8 space-y-3">
-                 <button onClick={onLogin} className="w-full bg-green-600 text-white font-bold py-3 rounded-lg shadow-md hover:bg-green-700 transition-all duration-200 active:scale-95">
+                 <Button onClick={onLogin} variant="primary" className="w-full" size="md">
                     लागीन करें (OTP)
-                </button>
-                 <button className="w-full bg-transparent border border-green-600 text-green-600 font-bold py-3 rounded-lg hover:bg-green-600/10 transition-all duration-200 active:scale-95">
+                </Button>
+                 <Button variant="outline" className="w-full" size="md">
                     साइन अप करें (ऍम)
-                </button>
+                </Button>
             </div>
 
             <p className="text-xs text-gray-500 dark:text-gray-500 mt-auto">

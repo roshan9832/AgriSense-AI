@@ -1,6 +1,8 @@
+
 import React, { useState } from 'react';
 import { ChatIcon, PlusIcon, UserIcon } from './Icons';
 import ToggleSwitch from './ToggleSwitch';
+import Button from './common/Button';
 
 interface ProfileProps {
     setPage: (page: 'Chat') => void;
@@ -31,9 +33,9 @@ const Profile: React.FC<ProfileProps> = ({ setPage }) => {
 
                 <div className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm">
                      <h3 className="font-semibold mb-2">My Reports</h3>
-                     <button className="w-full text-center bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-200 font-semibold py-2.5 rounded-lg hover:bg-green-200 dark:hover:bg-green-800 transition-all duration-200 active:scale-95">
+                     <Button variant="secondary" size="md" className="w-full !py-2.5">
                         Download All (PDF / CSV)
-                    </button>
+                    </Button>
                 </div>
                 
                  <div className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm">
