@@ -1,537 +1,428 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { GoogleGenAI, LiveSession, LiveServerMessage, Modality, Type, Blob } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import {
-    ChatIcon, ImageIcon, VideoIcon, MicIcon, LiveIcon, CloseIcon, SendIcon,
-    BotIcon, UserIcon, UploadIcon
+    UserIcon, CameraIcon, MicIcon, InfoIcon, SendIcon, RefreshIcon,
 } from './Icons';
 
-type Tab = 'chat' | 'image' | 'video' | 'transcribe' | 'live';
-type ChatModel = 'gemini-2.5-flash' | 'gemini-2.5-flash-lite' | 'gemini-2.5-pro';
-
-interface GeoAIAssistantProps {
-    isOpen: boolean;
-    onClose: () => void;
-    userLocation: { lat: number, lon: number } | null;
+// Fix for SpeechRecognition API types which are not included in standard TypeScript libs.
+interface SpeechRecognition extends EventTarget {
+    continuous: boolean;
+    interimResults: boolean;
+    lang: string;
+    start(): void;
+    stop(): void;
+    onresult: (event: SpeechRecognitionEvent) => void;
+    onend: () => void;
+    onerror: (event: SpeechRecognitionErrorEvent) => void;
 }
 
-// Audio helper functions from documentation
-function decode(base64: string) {
-    const binaryString = atob(base64);
-    const len = binaryString.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
+interface SpeechRecognitionEvent extends Event {
+    readonly results: SpeechRecognitionResultList;
+}
+
+interface SpeechRecognitionResultList {
+    readonly length: number;
+    item(index: number): SpeechRecognitionResult;
+    [index: number]: SpeechRecognitionResult;
+}
+
+interface SpeechRecognitionResult {
+    readonly isFinal: boolean;
+    readonly length: number;
+    item(index: number): SpeechRecognitionAlternative;
+    [index: number]: SpeechRecognitionAlternative;
+}
+
+interface SpeechRecognitionAlternative {
+    readonly transcript: string;
+    readonly confidence: number;
+}
+
+interface SpeechRecognitionErrorEvent extends Event {
+    readonly error: string;
+}
+
+type MessageContent = {
+    type: 'text';
+    value: string;
+} | {
+    type: 'map';
+    title: string;
+    imageUrl: string; // Placeholder for static map image
+} | {
+    type: 'barchart';
+    title: string;
+    subtitle: string;
+    labels: string[];
+    data: number[];
+} | {
+    type: 'image';
+    value: string; // Base64 Data URL
+}
+
+type ChatMessage = {
+    id: number;
+    role: 'user' | 'model';
+    content: MessageContent[];
+}
+
+const initialMessages: ChatMessage[] = [
+    {
+        id: 1,
+        role: 'user',
+        content: [{ type: 'text', value: 'मेरी धान की फसल पीली पड़ रही है, क्या करें?' }]
+    },
+    {
+        id: 2,
+        role: 'model',
+        content: [
+            { type: 'text', value: 'आपके खेत (NDVI: 0.43) में नमी कम है। सिंचाई 2 दिन में करें। साथ ही नाइट्रोजन स्प्रे (Urea 1%) की सलाह दी जाती है।' },
+            { type: 'map', title: 'NDVI Trend', imageUrl: 'https://i.imgur.com/4zA8E0L.png' }
+        ]
+    },
+    {
+        id: 3,
+        role: 'model',
+        content: [
+            {
+                type: 'barchart',
+                title: 'आपके लोकेशन (Darbhanga) में अगले 5 दिनों में 62% बारिश की संभावना है।',
+                subtitle: 'अगले 5 दिनों में बारिश की संभावना',
+                labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
+                data: [20, 62, 45, 30, 15]
+            }
+        ]
     }
-    return bytes;
-}
+];
 
-async function decodeAudioData(
-    data: Uint8Array, ctx: AudioContext, sampleRate: number, numChannels: number
-): Promise<AudioBuffer> {
-    const dataInt16 = new Int16Array(data.buffer);
-    const frameCount = dataInt16.length / numChannels;
-    const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
-
-    for (let channel = 0; channel < numChannels; channel++) {
-        const channelData = buffer.getChannelData(channel);
-        for (let i = 0; i < frameCount; i++) {
-            channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
-        }
-    }
-    return buffer;
-}
-
-function encode(bytes: Uint8Array) {
-    let binary = '';
-    const len = bytes.byteLength;
-    for (let i = 0; i < len; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    return btoa(binary);
-}
-
-function createBlob(data: Float32Array): Blob {
-    const l = data.length;
-    const int16 = new Int16Array(l);
-    for (let i = 0; i < l; i++) {
-      int16[i] = data[i] * 32768;
-    }
-    return {
-      data: encode(new Uint8Array(int16.buffer)),
-      mimeType: 'audio/pcm;rate=16000',
-    };
-}
-// End audio helpers
-
-const GeoAIAssistant: React.FC<GeoAIAssistantProps> = ({ isOpen, onClose, userLocation }) => {
-    const [activeTab, setActiveTab] = useState<Tab>('chat');
+const ChartVisual: React.FC<{ title: string, subtitle: string, labels: string[], data: number[] }> = ({ title, subtitle, labels, data }) => {
+    const maxValue = Math.max(...data, 1); // Avoid division by zero
+    const chartHeight = 120;
     
-    // Chat state
-    const [chatMessages, setChatMessages] = useState<{ role: 'user' | 'model', text: string, links?: any[] }[]>([
-        { role: 'model', text: 'Hello! I am your GeoAI assistant. How can I help you with your farm today?' }
-    ]);
+    return (
+        <div className="p-3 bg-white dark:bg-gray-700/50 rounded-lg mt-2 border border-gray-200 dark:border-gray-600">
+             <div className="mb-3">
+                <p className="font-bold text-sm text-gray-800 dark:text-gray-100">{title}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">{subtitle}</p>
+            </div>
+            <div className="flex justify-around items-end" style={{ height: `${chartHeight}px` }}>
+                {data.map((value, index) => (
+                    <div key={index} className="flex flex-col items-center w-1/5">
+                        <div 
+                            className="w-4/5 bg-gray-300 dark:bg-gray-500 rounded-t-sm"
+                            style={{ height: `${(value / maxValue) * chartHeight}px` }}
+                        ></div>
+                        <span className="text-xs mt-1 text-gray-600 dark:text-gray-300">{labels[index]}</span>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+};
+
+const MapVisual: React.FC<{ title: string, imageUrl: string }> = ({ title, imageUrl }) => {
+    return (
+        <div className="mt-2 group cursor-pointer">
+            <img src={imageUrl} alt={title} className="rounded-lg w-full h-auto" />
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 group-hover:underline">Tap to expand</p>
+        </div>
+    );
+};
+
+
+const GeoAIAssistant: React.FC = () => {
+    const [chatMessages, setChatMessages] = useState<ChatMessage[]>(initialMessages);
     const [chatInput, setChatInput] = useState('');
     const [isChatLoading, setIsChatLoading] = useState(false);
-    const [chatModel, setChatModel] = useState<ChatModel>('gemini-2.5-flash');
+    const [weather, setWeather] = useState<{ temp: number; moisture: string } | null>({ temp: 31, moisture: 'Low' });
+    const [isFetchingWeather, setIsFetchingWeather] = useState(false);
+    const [weatherError, setWeatherError] = useState<string | null>(null);
+    const [isListening, setIsListening] = useState(false);
+    const [speechApiSupported, setSpeechApiSupported] = useState(true);
+    
     const chatContainerRef = useRef<HTMLDivElement>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const speechRecognition = useRef<SpeechRecognition | null>(null);
 
-    // Image state
-    const [imageFile, setImageFile] = useState<File | null>(null);
-    const [imagePreview, setImagePreview] = useState<string | null>(null);
-    const [imageAnalysis, setImageAnalysis] = useState<string>('');
-    const [isImageLoading, setIsImageLoading] = useState(false);
-
-    // Video state
-    const [videoAnalysis, setVideoAnalysis] = useState<string>('');
-    const [isVideoLoading, setIsVideoLoading] = useState(false);
-
-    // Transcription state
-    const [transcript, setTranscript] = useState('');
-    const [isTranscribing, setIsTranscribing] = useState(false);
-    const transcriptSessionPromise = useRef<Promise<LiveSession> | null>(null);
-    const transcriptAudioContext = useRef<AudioContext | null>(null);
-    const transcriptStream = useRef<MediaStream | null>(null);
-    const transcriptProcessor = useRef<ScriptProcessorNode | null>(null);
-
-    // Live API state
-    const [liveTranscript, setLiveTranscript] = useState<{speaker: string, text: string}[]>([]);
-    const [isLive, setIsLive] = useState(false);
-    const liveSessionPromise = useRef<Promise<LiveSession> | null>(null);
-    const inputAudioContext = useRef<AudioContext | null>(null);
-    const outputAudioContext = useRef<AudioContext | null>(null);
-    const liveStream = useRef<MediaStream | null>(null);
-    const liveProcessor = useRef<ScriptProcessorNode | null>(null);
-    const liveSources = useRef(new Set<AudioBufferSourceNode>()).current;
-    const nextStartTime = useRef(0);
-
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
-    // Scroll chat to bottom
     useEffect(() => {
         if (chatContainerRef.current) {
             chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
         }
     }, [chatMessages]);
 
-    // Cleanup on close
     useEffect(() => {
-        if (!isOpen) {
-            if(isTranscribing) stopTranscription();
-            if(isLive) stopLiveConversation();
+        const SpeechRecognitionAPI = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        if (!SpeechRecognitionAPI) {
+            console.warn("Speech Recognition API not supported in this browser.");
+            setSpeechApiSupported(false);
+            return;
         }
-    }, [isOpen]);
 
-    const handleTabClick = (tab: Tab) => {
-        if (isTranscribing) stopTranscription();
-        if (isLive) stopLiveConversation();
-        setActiveTab(tab);
-    };
+        const recognition: SpeechRecognition = new SpeechRecognitionAPI();
+        recognition.continuous = false;
+        recognition.interimResults = true;
+        recognition.lang = 'hi-IN';
 
-    // --- CHAT LOGIC ---
-    const handleSendMessage = async () => {
-        if (!chatInput.trim() || isChatLoading) return;
-        
-        const newUserMessage = { role: 'user' as const, text: chatInput };
-        setChatMessages(prev => [...prev, newUserMessage]);
-        setChatInput('');
-        setIsChatLoading(true);
-
-        try {
-            const config: any = {};
-            // Always add Google Search grounding for up-to-date info. The model will decide when to use it.
-            const tools: any[] = [{ googleSearch: {} }];
-            const lowerCaseInput = chatInput.toLowerCase();
-
-            // Add Maps grounding if location is available and relevant keywords are used.
-            if (userLocation && (lowerCaseInput.includes('nearby') || lowerCaseInput.includes('closest'))) {
-                tools.push({ googleMaps: {} });
-                config.toolConfig = {
-                    retrievalConfig: {
-                        latLng: {
-                            latitude: userLocation.lat,
-                            longitude: userLocation.lon
-                        }
-                    }
-                };
-            }
-            
-            config.tools = tools;
-            
-            if (chatModel === 'gemini-2.5-pro') {
-                config.thinkingConfig = { thinkingBudget: 32768 };
-            }
-            
-            const response = await ai.models.generateContent({
-                model: chatModel,
-                contents: `You are an expert agricultural assistant. User's question: ${chatInput}`,
-                config,
-            });
-
-            const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
-            const newModelMessage = { role: 'model' as const, text: response.text, links: groundingChunks };
-            setChatMessages(prev => [...prev, newModelMessage]);
-
-        } catch (error) {
-            console.error("Chat Error:", error);
-            const errorMessage = { role: 'model' as const, text: "Sorry, I encountered an error. Please try again." };
-            setChatMessages(prev => [...prev, errorMessage]);
-        } finally {
-            setIsChatLoading(false);
-        }
-    };
-
-    // --- IMAGE ANALYSIS LOGIC ---
-    const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (e.target.files && e.target.files[0]) {
-            const file = e.target.files[0];
-            setImageFile(file);
-            setImagePreview(URL.createObjectURL(file));
-            setImageAnalysis('');
-        }
-    };
-
-    const handleAnalyzeImage = async () => {
-        if (!imageFile) return;
-        setIsImageLoading(true);
-        setImageAnalysis('');
-
-        const fileToPart = async (file: File) => {
-            const base64encoded = await new Promise<string>((resolve) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
-                reader.readAsDataURL(file);
-            });
-            return {
-                inlineData: {
-                    data: base64encoded,
-                    mimeType: file.type
-                }
-            };
+        recognition.onresult = (event) => {
+            const transcript = Array.from(event.results)
+                .map(result => result[0])
+                .map(result => result.transcript)
+                .join('');
+            setChatInput(transcript);
         };
 
-        try {
-            const imagePart = await fileToPart(imageFile);
-            const prompt = "Analyze this image from an agricultural perspective. Identify any visible crops, assess their health, and point out potential issues like pests, diseases, or nutrient deficiencies. Provide actionable advice for a farmer if possible.";
-            
-            const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash',
-                contents: { parts: [imagePart, { text: prompt }] },
-            });
-            setImageAnalysis(response.text);
-        } catch (error) {
-            console.error("Image Analysis Error:", error);
-            setImageAnalysis("Sorry, I couldn't analyze the image. Please try another one.");
-        } finally {
-            setIsImageLoading(false);
+        recognition.onend = () => {
+            setIsListening(false);
+        };
+        
+        recognition.onerror = (event) => {
+            console.error('Speech recognition error', event.error);
+            setIsListening(false);
+        };
+
+        speechRecognition.current = recognition;
+    }, []);
+
+    const handleMicClick = () => {
+        if (!speechRecognition.current) return;
+
+        if (isListening) {
+            speechRecognition.current.stop();
+        } else {
+            setChatInput(''); 
+            speechRecognition.current.start();
+            setIsListening(true);
         }
     };
 
-    // --- VIDEO ANALYSIS LOGIC (DEMO) ---
-    const handleAnalyzeVideo = async () => {
-        setIsVideoLoading(true);
-        setVideoAnalysis('');
-        try {
-             const response = await ai.models.generateContent({
-                model: 'gemini-2.5-pro',
-                contents: "Describe key information one might find in a video of a drone flying over a cornfield for crop monitoring.",
-                config: { thinkingConfig: { thinkingBudget: 32768 } }
-            });
-            setVideoAnalysis(response.text);
-        } catch(e) {
-            console.error(e);
-            setVideoAnalysis("An error occurred during the simulated analysis.");
-        } finally {
-            setIsVideoLoading(false);
+    const handleFetchWeather = async () => {
+        setIsFetchingWeather(true);
+        setWeatherError(null);
+        
+        if (!navigator.geolocation) {
+            setWeatherError("Geolocation is not supported by your browser.");
+            setIsFetchingWeather(false);
+            return;
         }
-    };
 
-    // --- TRANSCRIPTION LOGIC ---
-    const startTranscription = async () => {
-        if (isTranscribing) return;
-        setIsTranscribing(true);
-        setTranscript('');
-        try {
-            transcriptStream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
-            transcriptAudioContext.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-            
-            transcriptSessionPromise.current = ai.live.connect({
-                model: 'gemini-2.5-flash',
-                callbacks: {
-                    onopen: () => {
-                        const source = transcriptAudioContext.current!.createMediaStreamSource(transcriptStream.current!);
-                        transcriptProcessor.current = transcriptAudioContext.current!.createScriptProcessor(4096, 1, 1);
-                        transcriptProcessor.current.onaudioprocess = (audioProcessingEvent) => {
-                            const inputData = audioProcessingEvent.inputBuffer.getChannelData(0);
-                            const pcmBlob = createBlob(inputData);
-                            transcriptSessionPromise.current?.then((session) => {
-                                session.sendRealtimeInput({ media: pcmBlob });
-                            });
-                        };
-                        source.connect(transcriptProcessor.current);
-                        transcriptProcessor.current.connect(transcriptAudioContext.current!.destination);
-                    },
-                    onmessage: (message: LiveServerMessage) => {
-                        if (message.serverContent?.inputTranscription) {
-                            const text = message.serverContent.inputTranscription.text;
-                            setTranscript(prev => prev + text);
-                        }
-                    },
-                    onerror: (e: ErrorEvent) => console.error('Transcription error:', e),
-                    onclose: () => console.log('Transcription closed'),
-                },
-                config: { inputAudioTranscription: {} },
-            });
-        } catch (error) {
-            console.error('Failed to start transcription:', error);
-            setTranscript("Error: Could not access microphone.");
-            setIsTranscribing(false);
-        }
-    };
-    
-    const stopTranscription = async () => {
-        if (!isTranscribing) return;
-        setIsTranscribing(false);
-        transcriptProcessor.current?.disconnect();
-        transcriptAudioContext.current?.close();
-        transcriptStream.current?.getTracks().forEach(track => track.stop());
-        const session = await transcriptSessionPromise.current;
-        session?.close();
-    };
+        navigator.geolocation.getCurrentPosition(async (position) => {
+            const { latitude, longitude } = position.coords;
 
-    // --- LIVE API LOGIC ---
-    const startLiveConversation = async () => {
-        if(isLive) return;
-        setIsLive(true);
-        setLiveTranscript([]);
-        try {
-            liveStream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
-            inputAudioContext.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-            outputAudioContext.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-            
-            liveSessionPromise.current = ai.live.connect({
-                model: 'gemini-2.5-flash-native-audio-preview-09-2025',
-                callbacks: {
-                    onopen: () => {
-                        const source = inputAudioContext.current!.createMediaStreamSource(liveStream.current!);
-                        liveProcessor.current = inputAudioContext.current!.createScriptProcessor(4096, 1, 1);
-                        liveProcessor.current.onaudioprocess = (audioProcessingEvent) => {
-                            const inputData = audioProcessingEvent.inputBuffer.getChannelData(0);
-                            const pcmBlob = createBlob(inputData);
-                            liveSessionPromise.current?.then((session) => {
-                                session.sendRealtimeInput({ media: pcmBlob });
-                            });
-                        };
-                        source.connect(liveProcessor.current);
-                        liveProcessor.current.connect(inputAudioContext.current!.destination);
+            try {
+                const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+                const prompt = `Provide the current temperature in Celsius and a one-word moisture level description (e.g., Low, Medium, High) for latitude ${latitude} and longitude ${longitude}.`;
+                
+                const response = await ai.models.generateContent({
+                    model: "gemini-2.5-flash",
+                    contents: prompt,
+                    config: {
+                      responseMimeType: "application/json",
+                      responseSchema: {
+                        type: Type.OBJECT,
+                        properties: {
+                            temp: { type: Type.NUMBER, description: "Current temperature in Celsius." },
+                            moisture: { type: Type.STRING, description: "A single word describing moisture level (Low, Medium, High)." }
+                        },
+                        required: ["temp", "moisture"]
+                      }
                     },
-                    onmessage: async (message: LiveServerMessage) => {
-                        // Handle audio output
-                        const base64Audio = message.serverContent?.modelTurn?.parts[0]?.inlineData.data;
-                        if(base64Audio) {
-                            nextStartTime.current = Math.max(nextStartTime.current, outputAudioContext.current!.currentTime);
-                            const audioBuffer = await decodeAudioData(decode(base64Audio), outputAudioContext.current!, 24000, 1);
-                            const source = outputAudioContext.current!.createBufferSource();
-                            source.buffer = audioBuffer;
-                            source.connect(outputAudioContext.current!.destination);
-                            source.addEventListener('ended', () => { liveSources.delete(source); });
-                            source.start(nextStartTime.current);
-                            nextStartTime.current += audioBuffer.duration;
-                            liveSources.add(source);
-                        }
+                });
 
-                        // Handle transcription
-                        if (message.serverContent?.inputTranscription) {
-                           setLiveTranscript(prev => {
-                               const last = prev[prev.length - 1];
-                               if (last?.speaker === 'user') {
-                                   last.text += message.serverContent.inputTranscription.text;
-                                   return [...prev.slice(0, -1), last];
-                               }
-                               return [...prev, { speaker: 'user', text: message.serverContent.inputTranscription.text }];
-                           });
-                        }
-                        if (message.serverContent?.outputTranscription) {
-                            setLiveTranscript(prev => {
-                               const last = prev[prev.length - 1];
-                               if (last?.speaker === 'model') {
-                                   last.text += message.serverContent.outputTranscription.text;
-                                   return [...prev.slice(0, -1), last];
-                               }
-                               return [...prev, { speaker: 'model', text: message.serverContent.outputTranscription.text }];
-                           });
-                        }
-                    },
-                    onerror: (e: ErrorEvent) => console.error('Live error:', e),
-                    onclose: () => console.log('Live closed'),
-                },
-                config: {
-                    responseModalities: [Modality.AUDIO],
-                    inputAudioTranscription: {},
-                    outputAudioTranscription: {},
-                    systemInstruction: 'You are a friendly and helpful agricultural assistant.'
+                const parsed = JSON.parse(response.text);
+                if (parsed && typeof parsed.temp === 'number' && typeof parsed.moisture === 'string') {
+                    setWeather({ temp: Math.round(parsed.temp), moisture: parsed.moisture });
+                } else {
+                    throw new Error("Invalid data format from AI.");
                 }
-            });
 
-        } catch (error) {
-            console.error('Failed to start live conversation:', error);
-            setLiveTranscript([{speaker: 'model', text: 'Error: Could not access microphone.'}]);
-            setIsLive(false);
+            } catch (err) {
+                console.error("Failed to fetch weather:", err);
+                setWeatherError("Failed to fetch weather data.");
+            } finally {
+                setIsFetchingWeather(false);
+            }
+        }, (error) => {
+            console.error("Geolocation error:", error);
+            setWeatherError("Unable to retrieve your location.");
+            setIsFetchingWeather(false);
+        });
+    };
+
+    const handleSendMessage = async (messageText?: string) => {
+        const textToSend = (messageText || chatInput).trim();
+        if (!textToSend || isChatLoading) return;
+        
+        const newUserMessage: ChatMessage = {
+            id: Date.now(),
+            role: 'user',
+            content: [{ type: 'text', value: textToSend }]
+        };
+        setChatMessages(prev => [...prev, newUserMessage]);
+        if (!messageText) {
+            setChatInput('');
+        }
+        setIsChatLoading(true);
+
+        setTimeout(() => {
+            const newModelMessage: ChatMessage = {
+                id: Date.now() + 1,
+                role: 'model',
+                content: [{ type: 'text', value: `I received your message: "${textToSend}". As a demo, I can't generate a live response, but in a real application, I would connect to the Gemini API to provide a data-rich answer with visualizations.` }]
+            };
+            setChatMessages(prev => [...prev, newModelMessage]);
+            setIsChatLoading(false);
+        }, 1500);
+    };
+
+    const handleCameraClick = () => {
+        fileInputRef.current?.click();
+    };
+
+    const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                const base64String = reader.result as string;
+                const newUserMessage: ChatMessage = {
+                    id: Date.now(),
+                    role: 'user',
+                    content: [{ type: 'image', value: base64String }]
+                };
+                setChatMessages(prev => [...prev, newUserMessage]);
+
+                setIsChatLoading(true);
+                setTimeout(() => {
+                    const newModelMessage: ChatMessage = {
+                        id: Date.now() + 1,
+                        role: 'model',
+                        content: [{ type: 'text', value: "I've received the image. Analyzing for crop health... This appears to be a healthy leaf." }]
+                    };
+                    setChatMessages(prev => [...prev, newModelMessage]);
+                    setIsChatLoading(false);
+                }, 1500);
+            };
+            reader.readAsDataURL(file);
+        }
+        if (event.target) {
+            event.target.value = '';
         }
     };
-    const stopLiveConversation = async () => {
-        if(!isLive) return;
-        setIsLive(false);
-        liveProcessor.current?.disconnect();
-        inputAudioContext.current?.close();
-        outputAudioContext.current?.close();
-        liveStream.current?.getTracks().forEach(track => track.stop());
-        liveSources.forEach(s => s.stop());
-        const session = await liveSessionPromise.current;
-        session?.close();
-    };
 
 
-    if (!isOpen) return null;
-
-    const renderContent = () => {
-        switch (activeTab) {
-            case 'chat': return (
-                <div className="flex flex-col h-full">
-                    <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-                        <label htmlFor="model-select" className="text-sm text-gray-500 dark:text-gray-400 mr-2">Model:</label>
-                        <select id="model-select" value={chatModel} onChange={e => setChatModel(e.target.value as ChatModel)} className="bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md p-1 text-sm">
-                            <option value="gemini-2.5-flash">Fast (Flash)</option>
-                            <option value="gemini-2.5-flash-lite">Low Latency (Flash-Lite)</option>
-                            <option value="gemini-2.5-pro">Complex (Pro + Thinking)</option>
-                        </select>
+    return (
+        <div className="bg-gray-200 dark:bg-black flex flex-col h-full">
+            <header className="flex-shrink-0 p-4 bg-gray-200 dark:bg-black">
+                <div className="flex items-center justify-between mb-3">
+                    <h2 className="font-bold text-lg text-gray-900 dark:text-white">AI Geo Assistant</h2>
+                    <div className="flex items-center space-x-2">
+                        <button className="p-1 rounded-full text-gray-500 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-800 transition-colors duration-200">
+                            <UserIcon className="w-6 h-6" />
+                        </button>
                     </div>
-                    <div ref={chatContainerRef} className="flex-grow p-4 space-y-4 overflow-y-auto">
-                        {chatMessages.map((msg, i) => (
-                            <div key={i} className={`flex items-start gap-3 ${msg.role === 'user' ? 'justify-end' : ''}`}>
-                                {msg.role === 'model' && <div className="flex-shrink-0 w-8 h-8 rounded-full bg-green-500 flex items-center justify-center"><BotIcon className="w-5 h-5 text-white" /></div>}
-                                <div className={`max-w-xs md:max-w-md p-3 rounded-lg ${msg.role === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-100 dark:bg-gray-700'}`}>
-                                    <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
-                                    {msg.links && msg.links.length > 0 && (
-                                        <div className="mt-2 border-t border-gray-300 dark:border-gray-600 pt-2">
-                                            <h4 className="text-xs font-semibold mb-1">Sources:</h4>
-                                            <ul className="text-xs space-y-1">
-                                                {msg.links.map((link, idx) => (
-                                                  <li key={idx}><a href={link.web?.uri || link.maps?.uri} target="_blank" rel="noopener noreferrer" className="underline hover:text-green-500">{link.web?.title || link.maps?.title}</a></li>
-                                                ))}
-                                            </ul>
-                                        </div>
-                                    )}
-                                </div>
-                                {msg.role === 'user' && <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-300 dark:bg-gray-600 flex items-center justify-center"><UserIcon className="w-5 h-5" /></div>}
-                            </div>
-                        ))}
-                        {isChatLoading && <div className="flex justify-start"><div className="p-3 rounded-lg bg-gray-100 dark:bg-gray-700 text-sm">Thinking...</div></div>}
+                </div>
+                <div className="text-xs text-center text-gray-600 dark:text-gray-400 bg-gray-300 dark:bg-gray-800/50 p-2 rounded-lg flex items-center justify-center space-x-2">
+                    <div className="flex-grow text-center">
+                        {isFetchingWeather ? (
+                             <span>Fetching weather...</span>
+                        ) : weatherError ? (
+                             <span className="text-red-500">{weatherError}</span>
+                        ) : (
+                            <>
+                                <span>Temp: <strong>{weather?.temp ?? '--'}°C</strong></span>
+                                <span className="mx-2">|</span>
+                                <span>NDVI: <strong>0.72</strong></span>
+                                <span className="mx-2">|</span>
+                                <span>Moisture: <strong>{weather?.moisture ?? '--'}</strong></span>
+                            </>
+                        )}
                     </div>
-                    <div className="p-4 border-t border-gray-200 dark:border-gray-700">
-                        <div className="flex items-center space-x-2">
-                            <input
-                                type="text"
-                                value={chatInput}
-                                onChange={e => setChatInput(e.target.value)}
-                                onKeyDown={e => e.key === 'Enter' && handleSendMessage()}
-                                placeholder="Ask about your farm..."
-                                className="flex-grow bg-gray-100 dark:bg-gray-800 border-transparent rounded-md focus:ring-green-500 focus:border-green-500"
-                            />
-                            <button onClick={handleSendMessage} disabled={isChatLoading} className="bg-green-600 text-white p-2 rounded-full hover:bg-green-700 disabled:bg-gray-400">
-                                <SendIcon className="w-5 h-5"/>
-                            </button>
+                    <button onClick={handleFetchWeather} disabled={isFetchingWeather} className="p-1 text-gray-500 dark:text-gray-400 hover:bg-gray-400/50 dark:hover:bg-gray-700 rounded-full transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed">
+                       <RefreshIcon className={`w-4 h-4 ${isFetchingWeather ? 'animate-spin' : ''}`} />
+                    </button>
+                </div>
+            </header>
+            
+            <main ref={chatContainerRef} className="flex-grow p-4 space-y-4 overflow-y-auto">
+                {chatMessages.map((msg) => (
+                    <div key={msg.id} className={`flex items-start gap-3 ${msg.role === 'user' ? 'justify-end' : ''}`}>
+                        <div className={`w-full max-w-xs md:max-w-sm p-3 rounded-2xl ${msg.role === 'user' ? 'bg-lime-300 text-gray-800 rounded-br-none' : 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 shadow-sm rounded-bl-none'}`}>
+                            {msg.content.map((contentItem, index) => {
+                                switch (contentItem.type) {
+                                    case 'text':
+                                        return <p key={index} className="text-sm whitespace-pre-wrap">{contentItem.value}</p>;
+                                    case 'map':
+                                        return <MapVisual key={index} {...contentItem} />;
+                                    case 'barchart':
+                                        return <ChartVisual key={index} {...contentItem} />;
+                                    case 'image':
+                                        return <img key={index} src={contentItem.value} alt="User upload" className="rounded-lg w-full h-auto" />;
+                                    default:
+                                        return null;
+                                }
+                            })}
                         </div>
                     </div>
-                </div>
-            );
-            case 'image': return (
-                <div className="p-4 space-y-4 overflow-y-auto h-full">
-                    <h3 className="font-semibold">Analyze Crop Image</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Upload an image of a plant or crop to identify potential issues.</p>
-                    <div className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
-                        <input type="file" id="image-upload" accept="image/*" onChange={handleImageChange} className="hidden" />
-                        <label htmlFor="image-upload" className="cursor-pointer bg-white dark:bg-gray-700 p-4 rounded-lg shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 text-center">
-                            <UploadIcon className="w-10 h-10 mx-auto text-gray-400" />
-                            <span className="mt-2 block text-sm font-semibold text-green-600">{imageFile ? imageFile.name : "Choose an image"}</span>
-                        </label>
-                    </div>
-                    {imagePreview && <img src={imagePreview} alt="Preview" className="mx-auto rounded-lg max-h-48" />}
-                    <button onClick={handleAnalyzeImage} disabled={!imageFile || isImageLoading} className="w-full bg-green-600 text-white font-semibold py-2 rounded-md hover:bg-green-700 disabled:bg-gray-400">
-                        {isImageLoading ? 'Analyzing...' : 'Analyze Image'}
-                    </button>
-                    {imageAnalysis && <div className="p-3 bg-gray-100 dark:bg-gray-700 rounded-md text-sm whitespace-pre-wrap">{imageAnalysis}</div>}
-                </div>
-            );
-            case 'video': return (
-                <div className="p-4 space-y-4 overflow-y-auto h-full">
-                    <h3 className="font-semibold">Analyze Drone Footage (Conceptual)</h3>
-                    <div className="p-3 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-200 text-xs rounded-lg">
-                        <strong>Note:</strong> Direct video file analysis is not supported by this client-side app. This is a conceptual demo using Gemini Pro to generate a sample analysis based on a text prompt about a hypothetical video.
-                    </div>
-                    <button onClick={handleAnalyzeVideo} disabled={isVideoLoading} className="w-full bg-green-600 text-white font-semibold py-2 rounded-md hover:bg-green-700 disabled:bg-gray-400">
-                        {isVideoLoading ? 'Analyzing...' : 'Run Demo Analysis'}
-                    </button>
-                    {videoAnalysis && <div className="p-3 bg-gray-100 dark:bg-gray-700 rounded-md text-sm whitespace-pre-wrap">{videoAnalysis}</div>}
-                </div>
-            );
-            case 'transcribe': return (
-                <div className="p-4 space-y-4 overflow-y-auto h-full flex flex-col">
-                    <h3 className="font-semibold">Transcribe Audio Note</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Record your voice to transcribe field notes, observations, or questions.</p>
-                    <div className="flex-grow p-3 bg-gray-100 dark:bg-gray-700 rounded-md text-sm whitespace-pre-wrap">{transcript || 'Your transcript will appear here...'}</div>
-                    <button onClick={isTranscribing ? stopTranscription : startTranscription} className={`w-full font-semibold py-2 rounded-md ${isTranscribing ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'} text-white`}>
-                        {isTranscribing ? 'Stop Recording' : 'Start Recording'}
-                    </button>
-                </div>
-            );
-            case 'live': return (
-                 <div className="p-4 space-y-4 overflow-y-auto h-full flex flex-col">
-                    <h3 className="font-semibold">Live Conversation</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Speak directly with the GeoAI assistant in real-time.</p>
-                    <div className="flex-grow p-3 bg-gray-100 dark:bg-gray-700 rounded-md text-sm space-y-2">
-                        {liveTranscript.map((t,i) => <p key={i}><strong>{t.speaker === 'user' ? 'You' : 'AI'}:</strong> {t.text}</p>)}
-                        {!isLive && liveTranscript.length === 0 && <p>Your conversation will appear here...</p>}
-                    </div>
-                     <button onClick={isLive ? stopLiveConversation : startLiveConversation} className={`w-full font-semibold py-2 rounded-md ${isLive ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'} text-white`}>
-                        {isLive ? 'End Conversation' : 'Start Conversation'}
-                    </button>
-                </div>
-            );
-            default: return null;
-        }
-    };
+                ))}
+                {isChatLoading && <div className="flex justify-start"><div className="p-3 rounded-2xl bg-white dark:bg-gray-800 text-sm">...</div></div>}
+            </main>
 
-    const TABS: { id: Tab, name: string, icon: React.FC<any> }[] = [
-        { id: 'chat', name: 'Chat', icon: ChatIcon },
-        { id: 'image', name: 'Image', icon: ImageIcon },
-        { id: 'video', name: 'Video', icon: VideoIcon },
-        { id: 'transcribe', name: 'Transcribe', icon: MicIcon },
-        { id: 'live', name: 'Live', icon: LiveIcon },
-    ];
-    
-    return (
-        <div className={`fixed bottom-24 right-6 w-[90vw] max-w-md h-[70vh] max-h-[600px] bg-white dark:bg-gray-800 rounded-xl shadow-2xl flex flex-col z-50 transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : 'translate-x-[calc(100%+24px)]'}`}>
-            <header className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-                <h2 className="font-bold text-lg">GeoAI Assistant</h2>
-                <button onClick={onClose} className="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700"><CloseIcon className="w-6 h-6" /></button>
-            </header>
-            <div className="flex-grow flex flex-col overflow-hidden">
-                <nav className="flex-shrink-0 flex border-b border-gray-200 dark:border-gray-700">
-                    {TABS.map(({ id, name, icon: Icon }) => (
-                        <button
-                            key={id}
-                            onClick={() => handleTabClick(id)}
-                            className={`flex-1 flex flex-col items-center p-2 text-xs font-medium border-b-2 ${activeTab === id ? 'border-green-500 text-green-600' : 'border-transparent text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
-                        >
-                            <Icon className="w-5 h-5 mb-1" />
-                            {name}
-                        </button>
+            <footer className="flex-shrink-0 p-4 space-y-3 bg-gray-200 dark:bg-black">
+                 <div className="flex items-center flex-wrap gap-2">
+                    <button onClick={handleCameraClick} className="flex-shrink-0 text-xs font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 px-3 py-1.5 rounded-full shadow-sm transition-all duration-200 active:scale-95"><CameraIcon className="w-4 h-4 inline-block -ml-1 mr-1.5" /></button>
+                    
+                    {['मंडी रेट बना', 'सिंचाई सुझाव दो', 'मौसम देखो'].map(suggestion => (
+                         <button 
+                            key={suggestion}
+                            onClick={() => handleSendMessage(suggestion)}
+                            className="flex-shrink-0 text-xs font-medium bg-lime-200 hover:bg-lime-300 text-lime-900 px-3 py-1.5 rounded-full transition-all duration-200 active:scale-95"
+                          >
+                            {suggestion}
+                         </button>
                     ))}
-                </nav>
-                <main className="flex-grow bg-white dark:bg-gray-800 overflow-hidden">
-                    {renderContent()}
-                </main>
-            </div>
+                </div>
+                <div className="flex items-center space-x-2">
+                    <div className="relative flex-grow">
+                        <InfoIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
+                        <input
+                            type="file"
+                            ref={fileInputRef}
+                            onChange={handleFileChange}
+                            accept="image/*"
+                            capture="environment"
+                            className="hidden"
+                            aria-hidden="true"
+                        />
+                        <input
+                            type="text"
+                            value={chatInput}
+                            onChange={e => setChatInput(e.target.value)}
+                            onKeyDown={e => e.key === 'Enter' && handleSendMessage()}
+                            placeholder={isListening ? "Listening..." : "Ask me anything about your farm..."}
+                            className="w-full bg-white dark:bg-gray-800 border-transparent rounded-full focus:ring-green-500 focus:border-green-500 p-2.5 pl-10 pr-10 text-sm shadow-sm"
+                            aria-label="Chat input"
+                        />
+                         {speechApiSupported && (
+                            <button 
+                                onClick={handleMicClick} 
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-green-600 dark:text-gray-400 dark:hover:text-green-400 p-1"
+                                aria-label={isListening ? "Stop listening" : "Start voice input"}
+                                title={isListening ? "Stop listening" : "Start voice input"}
+                            >
+                                <MicIcon className={`w-5 h-5 transition-colors ${isListening ? 'text-red-500 animate-pulse' : ''}`} />
+                            </button>
+                        )}
+                    </div>
+                    <button 
+                        onClick={() => handleSendMessage()} 
+                        disabled={isChatLoading || !chatInput.trim()} 
+                        className="bg-green-600 text-white p-2.5 rounded-full hover:bg-green-700 disabled:bg-gray-400 flex-shrink-0 shadow-sm transition-all duration-200 active:scale-95"
+                        aria-label="Send message"
+                    >
+                        <SendIcon className="w-5 h-5"/>
+                    </button>
+                </div>
+            </footer>
         </div>
     );
 };

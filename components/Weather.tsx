@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { GoogleGenAI, Type } from "@google/genai";
 import {
@@ -26,6 +27,7 @@ const Weather: React.FC<WeatherProps> = ({ location }) => {
     const [forecastData, setForecastData] = useState<any[] | null>(null);
     const [alerts, setAlerts] = useState<WeatherAlert[]>([]);
     const [historicalData, setHistoricalData] = useState<any[] | null>(null);
+    const [rainfallForecast, setRainfallForecast] = useState<any[] | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
@@ -37,13 +39,12 @@ const Weather: React.FC<WeatherProps> = ({ location }) => {
                 try {
                     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-                    const prompt = `You are a helpful weather and agriculture assistant. Provide the current weather, a 5-day forecast, 2-3 actionable farm alerts, and historical weather for the past 7 days for latitude ${location.lat} and longitude ${location.lon}. Today is ${new Date().toDateString()}. The output must be in JSON format adhering to the provided schema. The forecast should contain exactly 5 days. For the current weather and forecast, provide an OpenWeatherMap-like icon code (e.g., '01d', '10n') for the 'icon' property. The wind speed should be in meters/second. The alerts should be critical and actionable for a farmer. The historical data should contain exactly 7 days, with the date in 'YYYY-MM-DD' format, average temperature in Celsius, and total precipitation in mm.`;
+                    const prompt = `You are a helpful weather and agriculture assistant. Provide the current weather, a 5-day forecast, a 7-day rainfall probability forecast, 2-3 actionable farm alerts, and historical weather for the past 7 days for latitude ${location.lat} and longitude ${location.lon}. Today is ${new Date().toDateString()}. The output must be in JSON format adhering to the provided schema. The forecast should contain exactly 5 days. The rainfall forecast should contain exactly 7 days, with each day having a 'date' in 'YYYY-MM-DD' format and a 'probability' as a number between 0 and 1. For the current weather and forecast, provide an OpenWeatherMap-like icon code (e.g., '01d', '10n') for the 'icon' property. The wind speed should be in meters/second. The alerts should be critical and actionable for a farmer. The historical data should contain exactly 7 days, with the date in 'YYYY-MM-DD' format, average temperature in Celsius, and total precipitation in mm.`;
                     
                     const response = await ai.models.generateContent({
                         model: "gemini-2.5-flash",
                         contents: prompt,
                         config: {
-                          tools: [{googleSearch: {}}],
                           responseMimeType: "application/json",
                           responseSchema: {
                             type: Type.OBJECT,
@@ -74,6 +75,17 @@ const Weather: React.FC<WeatherProps> = ({ location }) => {
                                         required: ["dt", "temp", "description", "icon"]
                                     }
                                 },
+                                rainfallForecast: {
+                                    type: Type.ARRAY,
+                                    items: {
+                                        type: Type.OBJECT,
+                                        properties: {
+                                            date: { type: Type.STRING },
+                                            probability: { type: Type.NUMBER }
+                                        },
+                                        required: ["date", "probability"]
+                                    }
+                                },
                                 alerts: {
                                     type: Type.ARRAY,
                                     items: {
@@ -99,7 +111,7 @@ const Weather: React.FC<WeatherProps> = ({ location }) => {
                                     }
                                 }
                             },
-                            required: ["name", "currentWeather", "forecast", "alerts", "historicalData"]
+                            required: ["name", "currentWeather", "forecast", "rainfallForecast", "alerts", "historicalData"]
                           }
                         },
                       });
@@ -128,6 +140,7 @@ const Weather: React.FC<WeatherProps> = ({ location }) => {
                         })));
                         setAlerts(parsed.alerts);
                         setHistoricalData(parsed.historicalData);
+                        setRainfallForecast(parsed.rainfallForecast);
                     } else {
                         throw new Error("Failed to parse weather data from AI response.");
                     }
@@ -179,7 +192,7 @@ const Weather: React.FC<WeatherProps> = ({ location }) => {
         return <div className="text-center p-8">Fetching local weather data with AI...</div>;
     }
 
-    if (error || !weatherData || !forecastData || !historicalData) {
+    if (error || !weatherData || !forecastData || !historicalData || !rainfallForecast) {
         return <div className="text-center p-8 text-red-500 bg-red-100 dark:bg-red-900/20 rounded-lg"><strong>Error:</strong> {error || "Could not load weather data."}</div>;
     }
 
@@ -245,6 +258,38 @@ const Weather: React.FC<WeatherProps> = ({ location }) => {
                             );
                         })}
                     </div>
+                </div>
+            </div>
+             <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-md border border-gray-100 dark:border-gray-700">
+                <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">7-Day Rainfall Outlook</h3>
+                <div className="space-y-4">
+                    {rainfallForecast.map((day: any, index: number) => {
+                        const probabilityPercent = Math.round(day.probability * 100);
+                        return (
+                            <div key={index} className="grid grid-cols-4 items-center gap-4 text-sm">
+                                <p className="font-medium text-gray-700 dark:text-gray-300 col-span-1">
+                                    {new Date(day.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' })}
+                                </p>
+                                <div className="col-span-2 flex items-center">
+                                    <WeatherRainIcon className="w-5 h-5 mr-3 text-blue-400 flex-shrink-0" />
+                                    <div className="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2.5" role="presentation">
+                                        <div 
+                                            className="bg-blue-500 h-2.5 rounded-full" 
+                                            style={{ width: `${probabilityPercent}%` }}
+                                            aria-valuenow={probabilityPercent}
+                                            aria-valuemin="0"
+                                            aria-valuemax="100"
+                                            role="progressbar"
+                                            aria-label={`Rain probability: ${probabilityPercent}%`}
+                                        ></div>
+                                    </div>
+                                </div>
+                                <p className="font-semibold text-gray-800 dark:text-gray-200 col-span-1 text-right">
+                                    {probabilityPercent}%
+                                </p>
+                            </div>
+                        );
+                    })}
                 </div>
             </div>
              <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-md border border-gray-100 dark:border-gray-700">

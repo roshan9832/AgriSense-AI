@@ -3,6 +3,7 @@
   "description": "A smart agriculture platform leveraging GeoAI (AI, GIS, Satellite Imagery, ML) to empower farmers, researchers, and policymakers with data-driven insights for a sustainable future.",
   "requestFramePermissions": [
     "geolocation",
-    "microphone"
+    "microphone",
+    "camera"
   ]
 }
