@@ -42,6 +42,16 @@ interface SpeechRecognitionErrorEvent extends Event {
     readonly error: string;
 }
 
+declare global {
+    interface Window {
+        // FIX: Correctly type SpeechRecognition and webkitSpeechRecognition as constructors.
+        // The 'typeof SpeechRecognition' was causing an error because 'SpeechRecognition' was only defined as a type (interface).
+        SpeechRecognition: new () => SpeechRecognition;
+        webkitSpeechRecognition: new () => SpeechRecognition;
+    }
+}
+
+
 type MessageContent = {
     type: 'text';
     value: string;
@@ -151,7 +161,7 @@ const GeoAIAssistant: React.FC = () => {
     }, [chatMessages]);
 
     useEffect(() => {
-        const SpeechRecognitionAPI = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SpeechRecognitionAPI) {
             console.warn("Speech Recognition API not supported in this browser.");
             setSpeechApiSupported(false);
@@ -188,6 +198,7 @@ const GeoAIAssistant: React.FC = () => {
 
         if (isListening) {
             speechRecognition.current.stop();
+            setIsListening(false);
         } else {
             setChatInput(''); 
             speechRecognition.current.start();
