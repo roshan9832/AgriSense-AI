@@ -63,6 +63,28 @@
         }
       }
       
+      /* Marker for AI Point Analysis */
+      .point-analysis-marker div {
+          background-color: #6366f1; /* indigo-500 */
+          width: 20px;
+          height: 20px;
+          border-radius: 50%;
+          border: 3px solid white;
+          box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+      }
+      .point-analysis-marker::after {
+          content: '';
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          width: 20px;
+          height: 20px;
+          border-radius: 50%;
+          background-color: rgba(99, 102, 241, 0.4); /* indigo-500 with opacity */
+          animation: pulse 1.5s infinite;
+          z-index: -1;
+      }
+
       /* Custom Map Controls */
       .leaflet-control-custom {
           background-color: white;
@@ -154,6 +176,63 @@
       }
       .dark .bottom-sheet-handle {
           background-color: #4b5563; /* gray-600 */
+      }
+      
+      /* Time-lapse control */
+      .time-lapse-control {
+          position: absolute;
+          bottom: 90px;
+          left: 50%;
+          transform: translateX(-50%);
+          z-index: 1000;
+          background-color: rgba(255, 255, 255, 0.8);
+          backdrop-filter: blur(8px);
+          border-radius: 12px;
+          padding: 12px 16px;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+          width: 90%;
+          max-width: 500px;
+      }
+      .dark .time-lapse-control {
+          background-color: rgba(31, 41, 55, 0.8);
+      }
+      /* Custom Range Slider */
+      input[type=range].custom-slider {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 100%;
+        height: 8px;
+        background: #d1d5db; /* gray-300 */
+        border-radius: 5px;
+        outline: none;
+        opacity: 0.9;
+        transition: opacity .2s;
+      }
+      input[type=range].custom-slider:hover {
+        opacity: 1;
+      }
+      .dark input[type=range].custom-slider {
+        background: #4b5563; /* gray-600 */
+      }
+      input[type=range].custom-slider::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 20px;
+        height: 20px;
+        background: #16a34a; /* green-600 */
+        border: 2px solid white;
+        border-radius: 50%;
+        cursor: pointer;
+        box-shadow: 0 0 4px rgba(0,0,0,0.2);
+      }
+      input[type=range].custom-slider::-moz-range-thumb {
+        width: 20px;
+        height: 20px;
+        background: #16a34a; /* green-600 */
+        border: 2px solid white;
+        border-radius: 50%;
+        cursor: pointer;
+        box-shadow: 0 0 4px rgba(0,0,0,0.2);
       }
     </style>
   <script type="importmap">

@@ -1,4 +1,5 @@
 
+
 import React from 'react';
 import { Page } from '../App';
 import InteractiveMap from './InteractiveMap';
@@ -81,7 +82,7 @@ const Dashboard: React.FC<DashboardProps> = ({ location, setPage, farmGeoData, f
             <main className="p-4 space-y-4">
                 {/* 2. Farm Overview Map */}
                 <div className="w-full h-48 bg-gray-200 dark:bg-gray-800 rounded-xl shadow-md overflow-hidden border border-gray-200 dark:border-gray-700">
-                    <InteractiveMap location={location} isNdviVisible={true} farmGeoData={farmGeoData}/>
+                    <InteractiveMap location={location} farmGeoData={farmGeoData} showControls={false} />
                 </div>
                 
                 {/* 3, 4, 5. Main Widgets Grid */}

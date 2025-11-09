@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+
+
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import InteractiveMap from './InteractiveMap';
-import { CloseIcon, AlertIcon, SparklesIcon } from './Icons';
+import { CloseIcon, AlertIcon, SparklesIcon, PlayIcon, PauseIcon } from './Icons';
 import Button from './common/Button';
 import IconButton from './common/IconButton';
-import ToggleSwitch from './ToggleSwitch';
 
 const AnalysisModal: React.FC<{
     isOpen: boolean;
@@ -48,6 +49,40 @@ const AnalysisModal: React.FC<{
     );
 };
 
+// Generates 6 months of historical data leading up to the latest data point.
+const generateHistoricalData = (latestData: any, months: number = 6) => {
+    const history = [];
+    const today = new Date();
+
+    for (let i = months - 1; i >= 0; i--) {
+        const date = new Date(today);
+        date.setMonth(today.getMonth() - i);
+        
+        const newFeatures = latestData.features.map((feature: any) => {
+            const finalNdvi = feature.properties.ndvi;
+            // Simple growth curve simulation (peaks around month 4-5)
+            const growthStage = (months - 1 - i) / (months - 1); // 0 to 1
+            const ndvi = finalNdvi * (Math.sin(growthStage * Math.PI) * 0.8 + 0.2) + (Math.random() - 0.5) * 0.05;
+            
+            return {
+                ...feature,
+                properties: {
+                    ...feature.properties,
+                    ndvi: Math.max(0.1, Math.min(0.99, parseFloat(ndvi.toFixed(2))))
+                }
+            };
+        });
+
+        history.push({
+            date: date,
+            geoData: { ...latestData, features: newFeatures }
+        });
+    }
+
+    return history;
+};
+
+
 interface FarmMapProps {
     location: { lat: number; lon: number } | null;
     farmGeoData: any;
@@ -58,7 +93,45 @@ const FarmMap: React.FC<FarmMapProps> = ({ location, farmGeoData }) => {
     const [analysisResult, setAnalysisResult] = useState<string | null>(null);
     const [analysisError, setAnalysisError] = useState<string | null>(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
-    const [isNdviVisible, setIsNdviVisible] = useState(true);
+
+    const [historicalData, setHistoricalData] = useState<any[]>([]);
+    const [timeIndex, setTimeIndex] = useState(5);
+    const [isPlaying, setIsPlaying] = useState(false);
+    const intervalRef = useRef<number | null>(null);
+
+    useEffect(() => {
+        if (farmGeoData?.features?.length > 0) {
+            const history = generateHistoricalData(farmGeoData, 6);
+            setHistoricalData(history);
+            setTimeIndex(history.length - 1);
+        }
+    }, [farmGeoData]);
+
+    const handlePlayPause = useCallback(() => {
+        if (isPlaying) {
+            if (intervalRef.current) clearInterval(intervalRef.current);
+            setIsPlaying(false);
+        } else {
+            setIsPlaying(true);
+            intervalRef.current = window.setInterval(() => {
+                setTimeIndex(prevIndex => {
+                    const nextIndex = prevIndex + 1;
+                    if (nextIndex >= historicalData.length) {
+                        if (intervalRef.current) clearInterval(intervalRef.current);
+                        setIsPlaying(false);
+                        return prevIndex;
+                    }
+                    return nextIndex;
+                });
+            }, 1000);
+        }
+    }, [isPlaying, historicalData.length]);
+
+    useEffect(() => {
+        return () => {
+            if (intervalRef.current) clearInterval(intervalRef.current);
+        };
+    }, []);
 
     const handleAnalysis = async () => {
         setIsAnalyzing(true);
@@ -99,6 +172,8 @@ Soil Moisture Data: ${JSON.stringify(simplifiedSoilData)}`;
         }
     };
 
+    const currentGeoData = historicalData[timeIndex]?.geoData;
+    const currentDate = historicalData[timeIndex]?.date;
 
     return (
         <>
@@ -111,20 +186,10 @@ Soil Moisture Data: ${JSON.stringify(simplifiedSoilData)}`;
             <div className="relative h-full w-full">
                 <InteractiveMap 
                     location={location}
-                    isNdviVisible={isNdviVisible}
-                    farmGeoData={farmGeoData}
+                    farmGeoData={currentGeoData}
                 />
                 
-                {/* Overlay Controls */}
-                 <div className="absolute bottom-20 sm:bottom-32 right-4 z-[1000] flex flex-col items-end gap-3">
-                    <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm p-3 rounded-xl shadow-lg border border-white/20">
-                        <ToggleSwitch 
-                            id="ndvi-toggle" 
-                            label="NDVI Overlay" 
-                            enabled={isNdviVisible} 
-                            setEnabled={setIsNdviVisible} 
-                        />
-                    </div>
+                <div className="absolute bottom-20 sm:bottom-32 right-4 z-[1000] flex flex-col items-end gap-3">
                     <Button 
                         variant="primary" 
                         size="md" 
@@ -137,6 +202,33 @@ Soil Moisture Data: ${JSON.stringify(simplifiedSoilData)}`;
                         <span>Analyze Soil</span>
                     </Button>
                 </div>
+                
+                {historicalData.length > 0 && (
+                     <div className="time-lapse-control">
+                        <div className="flex items-center gap-4">
+                            <IconButton variant="subtle" size="sm" onClick={handlePlayPause}>
+                                {isPlaying ? <PauseIcon className="w-6 h-6"/> : <PlayIcon className="w-6 h-6"/>}
+                            </IconButton>
+                            <div className="flex-grow">
+                                <input
+                                    type="range"
+                                    min="0"
+                                    max={historicalData.length - 1}
+                                    value={timeIndex}
+                                    onChange={(e) => setTimeIndex(Number(e.target.value))}
+                                    className="custom-slider w-full"
+                                />
+                                <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                    <span>{historicalData[0].date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}</span>
+                                    <span>{historicalData[historicalData.length - 1].date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}</span>
+                                </div>
+                            </div>
+                            <div className="w-24 text-center">
+                                <p className="font-bold text-gray-800 dark:text-gray-100">{currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</p>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
         </>
     );

@@ -1,7 +1,10 @@
+
+
 import React, { useEffect, useRef, useState } from 'react';
 import * as L from 'leaflet';
 import ReactDOMServer from 'react-dom/server';
-import { WaterSourceIcon, WeatherStationIcon, CloseIcon, CrosshairsIcon } from './Icons';
+import { GoogleGenAI } from "@google/genai";
+import { WaterSourceIcon, WeatherStationIcon, CloseIcon, CrosshairsIcon, WeatherRainIcon, SparklesIcon, FlaskIcon } from './Icons';
 import Button from './common/Button';
 import IconButton from './common/IconButton';
 import { GeoSearchControl, OpenStreetMapProvider } from 'leaflet-geosearch';
@@ -68,6 +71,23 @@ const getMoistureStyle = (level: string) => {
     }
 };
 
+const getRainfallStyle = (feature: any) => {
+    const intensity = feature.properties.intensity;
+    const color = intensity > 40 ? '#08306b' : // Heavy
+                  intensity > 20 ? '#08519c' :
+                  intensity > 10 ? '#2171b5' :
+                  intensity > 5 ? '#4292c6' :
+                  intensity > 1 ? '#6baed6' : // Light
+                  'transparent'; // Very light
+    return {
+        color: 'transparent',
+        fillColor: color,
+        weight: 0,
+        fillOpacity: 0.5
+    };
+};
+
+
 const createCustomIcon = (iconComponent: React.ReactElement) => {
     return L.divIcon({
         html: ReactDOMServer.renderToString(iconComponent),
@@ -132,6 +152,21 @@ const BottomSheet: React.FC<{ plot: any | null, onClose: () => void }> = ({ plot
                                     {moistureStatus.text}
                                 </span>
                             </div>
+                            {plot.soil_type && (
+                                <div className="flex justify-between items-center">
+                                    <span className="text-gray-600 dark:text-gray-400">Soil Type:</span>
+                                    <span className="font-semibold text-gray-800 dark:text-gray-200">{plot.soil_type}</span>
+                                </div>
+                            )}
+                            {plot.soil_ph && typeof plot.soil_ph === 'number' && (
+                                <div className="flex justify-between items-center">
+                                    <span className="text-gray-600 dark:text-gray-400 flex items-center">
+                                        <FlaskIcon className="w-4 h-4 mr-2 text-purple-500" />
+                                        Soil pH:
+                                    </span>
+                                    <span className="font-semibold text-gray-800 dark:text-gray-200">{plot.soil_ph.toFixed(1)}</span>
+                                </div>
+                            )}
                         </div>
                         <div className="px-4 pb-4 border-t border-gray-200 dark:border-gray-700 pt-4">
                             <Button variant="secondary" size="sm" className="w-full">View Full Report</Button>
@@ -143,18 +178,64 @@ const BottomSheet: React.FC<{ plot: any | null, onClose: () => void }> = ({ plot
     );
 };
 
+const PointAnalysisSheet: React.FC<{ 
+    analysis: { latlng: L.LatLng, result: string | null, error: string | null } | null, 
+    isLoading: boolean,
+    onClose: () => void 
+}> = ({ analysis, isLoading, onClose }) => {
+    
+    return (
+        <div className={`absolute bottom-0 left-0 right-0 z-[1001] w-full max-w-xl mx-auto transform transition-transform duration-300 ease-in-out ${analysis ? 'translate-y-0' : 'translate-y-full'}`}
+             aria-hidden={!analysis}
+        >
+            <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm rounded-t-2xl shadow-[0_-8px_20px_rgba(0,0,0,0.1)] dark:shadow-[0_-8px_20px_rgba(0,0,0,0.3)]">
+                <div className="w-full flex justify-center pt-3 pb-1 cursor-grab" onClick={onClose}>
+                    <div className="bottom-sheet-handle"></div>
+                </div>
+
+                {analysis && (
+                    <>
+                        <div className="flex justify-between items-center px-4 pt-0 pb-3">
+                            <h3 className="font-bold text-lg text-gray-800 dark:text-gray-100 flex items-center">
+                                <SparklesIcon className="w-5 h-5 mr-2 text-indigo-500" />
+                                AI Point Analysis
+                            </h3>
+                            <IconButton variant="subtle" size="sm" onClick={onClose} aria-label="Close details">
+                                <CloseIcon className="w-5 h-5" />
+                            </IconButton>
+                        </div>
+                        <div className="px-4 pb-4 space-y-3 min-h-[100px]">
+                            {isLoading ? (
+                                <div className="flex items-center justify-center h-full text-gray-500 dark:text-gray-400">
+                                    <svg className="animate-spin h-6 w-6 mr-3" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                                    <span>Analyzing coordinates...</span>
+                                </div>
+                            ) : analysis.error ? (
+                                <p className="text-red-600 dark:text-red-400 text-sm">{analysis.error}</p>
+                            ) : (
+                                <p className="text-gray-700 dark:text-gray-300 text-sm whitespace-pre-wrap">{analysis.result}</p>
+                            )}
+                        </div>
+                    </>
+                )}
+            </div>
+        </div>
+    );
+};
+
 
 interface InteractiveMapProps {
     location: { lat: number, lon: number } | null;
-    isNdviVisible: boolean;
     farmGeoData: any; // The dynamic farm data GeoJSON
+    showControls?: boolean;
 }
 
 const MapLegend: React.FC<{
     showNdvi: boolean;
     showSoilMoisture: boolean;
-}> = ({ showNdvi, showSoilMoisture }) => (
-    <div className="absolute bottom-20 sm:bottom-4 left-4 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm p-3 rounded-lg shadow-lg z-[1000] w-52 text-xs transition-all duration-300">
+    showRainfall: boolean;
+}> = ({ showNdvi, showSoilMoisture, showRainfall }) => (
+    <div className="absolute bottom-20 sm:bottom-4 left-4 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm p-3 rounded-lg shadow-lg z-[1000] w-56 text-xs transition-all duration-300">
         <h4 className="font-bold mb-2 text-gray-800 dark:text-gray-100 border-b border-gray-300 dark:border-gray-600 pb-1">Legend</h4>
         
         <div className={`overflow-hidden transition-all duration-300 ease-in-out ${showNdvi ? 'max-h-40 opacity-100 mt-2' : 'max-h-0 opacity-0'}`}>
@@ -184,8 +265,17 @@ const MapLegend: React.FC<{
                 </li>
             </ul>
         </div>
+
+        <div className={`overflow-hidden transition-all duration-300 ease-in-out ${showRainfall ? 'max-h-40 opacity-100 mt-2' : 'max-h-0 opacity-0'}`}>
+             <p className="font-semibold text-gray-700 dark:text-gray-200 flex items-center"><WeatherRainIcon className="w-4 h-4 mr-1 text-blue-500"/>7-Day Rainfall (mm)</p>
+             <div className="w-full h-3 my-1 rounded-full bg-gradient-to-r from-[#6baed6] to-[#08306b] border border-gray-200 dark:border-gray-600"></div>
+             <div className="flex justify-between text-gray-600 dark:text-gray-400 text-[10px] px-1">
+                 <span>Light (&lt;5)</span>
+                 <span>Heavy (&gt;40)</span>
+             </div>
+        </div>
         
-        <div className={`pt-2 transition-all duration-300 ease-in-out ${(showNdvi || showSoilMoisture) ? 'mt-2 border-t border-gray-300 dark:border-gray-600' : ''}`}>
+        <div className={`pt-2 transition-all duration-300 ease-in-out ${(showNdvi || showSoilMoisture || showRainfall) ? 'mt-2 border-t border-gray-300 dark:border-gray-600' : ''}`}>
             <p className="font-semibold text-gray-700 dark:text-gray-200 mb-1">Points of Interest</p>
             <ul className="space-y-1">
                 <li className="flex items-center text-sm">
@@ -201,22 +291,66 @@ const MapLegend: React.FC<{
     </div>
 );
 
+const generateRainfallData = (center: { lat: number, lon: number }) => {
+    const features = [];
+    const bounds = L.latLng(center.lat, center.lon).toBounds(10000); // 10km radius
+    
+    for (let i = 0; i < 25; i++) { // 25 random patches
+        const intensity = Math.random() * 50; // 0-50mm
+        const lat = bounds.getSouth() + Math.random() * (bounds.getNorth() - bounds.getSouth());
+        const lon = bounds.getWest() + Math.random() * (bounds.getEast() - bounds.getWest());
+        const size = 0.005 + Math.random() * 0.01;
+        
+        features.push({
+            type: "Feature",
+            properties: { intensity },
+            geometry: {
+                type: "Polygon",
+                coordinates: [[
+                    [lon, lat],
+                    [lon + size, lat],
+                    [lon + size, lat + size],
+                    [lon, lat + size],
+                    [lon, lat],
+                ]]
+            }
+        });
+    }
+    return { type: "FeatureCollection", features };
+};
 
-const InteractiveMap: React.FC<InteractiveMapProps> = ({ location, isNdviVisible, farmGeoData }) => {
+
+const InteractiveMap: React.FC<InteractiveMapProps> = ({ location, farmGeoData, showControls = true }) => {
     const mapContainerRef = useRef<HTMLDivElement>(null);
     const mapRef = useRef<L.Map | null>(null);
     const userLocationMarkerRef = useRef<L.Marker | null>(null);
     const farmPlotsLayerRef = useRef<L.GeoJSON | null>(null);
+    const rainfallLayerRef = useRef<L.GeoJSON | null>(null);
+    const analysisMarkerRef = useRef<L.Marker | null>(null);
 
     const waterMarkerRef = useRef<L.Marker | null>(null);
     const stationMarkerRef = useRef<L.Marker | null>(null);
     
+    const [isNdviVisible, setIsNdviVisible] = useState(true);
+    const [isRainfallVisible, setIsRainfallVisible] = useState(true);
     const [showSoilMoisture, setShowSoilMoisture] = useState(false);
     const [selectedPlot, setSelectedPlot] = useState<any | null>(null);
     const [hasCenteredOnUser, setHasCenteredOnUser] = useState(false);
+    const [rainfallGeoJson, setRainfallGeoJson] = useState<any | null>(null);
+    const [analysisPoint, setAnalysisPoint] = useState<any | null>(null);
+    const [isPointAnalyzing, setIsPointAnalyzing] = useState(false);
 
     const [weatherData, setWeatherData] = useState({ temp: 32.1, wind: 15, humidity: 65 });
     const [waterData, setWaterData] = useState({ flow: 45, level: 89 });
+
+    // Refs to hold current state for Leaflet control access
+    const isNdviVisibleRef = useRef(isNdviVisible);
+    const isRainfallVisibleRef = useRef(isRainfallVisible);
+    useEffect(() => {
+        isNdviVisibleRef.current = isNdviVisible;
+        isRainfallVisibleRef.current = isRainfallVisible;
+    }, [isNdviVisible, isRainfallVisible]);
+
 
     useEffect(() => {
         const intervalId = setInterval(() => {
@@ -262,6 +396,42 @@ const InteractiveMap: React.FC<InteractiveMapProps> = ({ location, isNdviVisible
     }, [weatherData, waterData]);
 
 
+    const handlePointAnalysis = async (latlng: L.LatLng) => {
+        setIsPointAnalyzing(true);
+        setAnalysisPoint({ latlng, result: null, error: null });
+
+        if (analysisMarkerRef.current) {
+            analysisMarkerRef.current.setLatLng(latlng);
+        } else {
+            const pulsingIcon = L.divIcon({
+                className: 'point-analysis-marker',
+                html: `<div></div>`,
+                iconSize: [20, 20],
+                iconAnchor: [10, 10],
+            });
+            analysisMarkerRef.current = L.marker(latlng, { icon: pulsingIcon });
+        }
+        analysisMarkerRef.current?.addTo(mapRef.current!);
+
+        try {
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            const prompt = `Provide a concise agricultural analysis for the GPS coordinate: latitude ${latlng.lat.toFixed(5)}, longitude ${latlng.lng.toFixed(5)}. Focus on:
+1.  **Potential Soil Type:** (e.g., Loamy, Sandy, Clayey) based on general regional data.
+2.  **Crop Suitability:** Suggest 2-3 suitable crops for this likely soil type and climate.
+3.  **Key Recommendation:** Provide one critical, actionable tip for this specific point (e.g., "Check for waterlogging if in a low-lying area," or "Ideal for shallow-root crops due to potential rockiness.").
+Keep the entire response in a single paragraph under 60 words.`;
+
+            const response = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: prompt });
+            setAnalysisPoint({ latlng, result: response.text, error: null });
+        } catch (error) {
+            console.error("Point analysis failed:", error);
+            setAnalysisPoint({ latlng, result: null, error: "Sorry, could not analyze this point. Please try again." });
+        } finally {
+            setIsPointAnalyzing(false);
+        }
+    };
+
+
     useEffect(() => {
         if (mapContainerRef.current && !mapRef.current) {
             const map = L.map(mapContainerRef.current, {
@@ -294,6 +464,9 @@ const InteractiveMap: React.FC<InteractiveMapProps> = ({ location, isNdviVisible
                 }
             }).addTo(map);
             farmPlotsLayerRef.current = farmPlotsLayer;
+
+            // Initialize Rainfall Layer
+            rainfallLayerRef.current = L.geoJSON(undefined, { style: getRainfallStyle, interactive: false });
             
             // Define Overlay Layers
             const soilLayer = L.geoJSON(soilMoistureData as any, { style: (f) => getMoistureStyle(f?.properties.moistureLevel), interactive: false });
@@ -326,7 +499,7 @@ const InteractiveMap: React.FC<InteractiveMapProps> = ({ location, isNdviVisible
 
             const baseMaps = { "Satellite": satelliteLayer, "Street": streetLayer };
             const overlayMaps = { "Soil Moisture": soilLayer };
-            L.control.layers(baseMaps, overlayMaps, { position: 'topright' }).addTo(map);
+            const layersControl = L.control.layers(baseMaps, overlayMaps, { position: 'topright' }).addTo(map);
             satelliteLayer.addTo(map);
             
             const MyLocationControl = L.Control.extend({
@@ -342,6 +515,65 @@ const InteractiveMap: React.FC<InteractiveMapProps> = ({ location, isNdviVisible
                 },
             });
             map.addControl(new MyLocationControl({ position: 'bottomright' }));
+
+             if (showControls) {
+                const OverlayToggleControl = L.Control.extend({
+                    onAdd: () => {
+                        const container = L.DomUtil.create('div', 'leaflet-control bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm p-3 rounded-xl shadow-lg border border-white/20');
+                        L.DomEvent.disableClickPropagation(container);
+                        L.DomEvent.disableScrollPropagation(container);
+
+                        const createToggle = (id: string, labelText: string, getterRef: React.MutableRefObject<boolean>, setter: React.Dispatch<React.SetStateAction<boolean>>) => {
+                            const wrapper = L.DomUtil.create('div', 'flex justify-between items-center w-full', container);
+                            wrapper.style.minWidth = '160px';
+
+                            const label = L.DomUtil.create('label', 'font-medium text-sm text-gray-700 dark:text-gray-200 mr-4 cursor-pointer', wrapper);
+                            label.htmlFor = id;
+                            label.innerText = labelText;
+                            
+                            const button = L.DomUtil.create('button', 'w-12 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors duration-300 ease-in-out', wrapper);
+                            button.id = id;
+                            button.role = 'switch';
+                            
+                            const knob = L.DomUtil.create('div', 'bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-300 ease-in-out', button);
+
+                            const updateUI = (enabled: boolean) => {
+                                button.setAttribute('aria-checked', String(enabled));
+                                if (enabled) {
+                                    button.className = 'w-12 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors duration-300 ease-in-out bg-green-500';
+                                    knob.className = 'bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-300 ease-in-out translate-x-6';
+                                } else {
+                                    button.className = 'w-12 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors duration-300 ease-in-out bg-gray-300 dark:bg-gray-600';
+                                    knob.className = 'bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-300 ease-in-out';
+                                }
+                            };
+
+                            updateUI(getterRef.current);
+                            
+                            L.DomEvent.on(button, 'click', () => {
+                                const newState = !getterRef.current;
+                                setter(newState);
+                                updateUI(newState);
+                            });
+
+                            return wrapper;
+                        };
+
+                        createToggle('ndvi-toggle-map', 'NDVI Overlay', isNdviVisibleRef, setIsNdviVisible);
+                        L.DomUtil.create('div', 'h-2', container);
+                        createToggle('rainfall-toggle-map', 'Rainfall Forecast', isRainfallVisibleRef, setIsRainfallVisible);
+
+                        return container;
+                    },
+                });
+                const toggleControl = new OverlayToggleControl({ position: 'topright' });
+                map.addControl(toggleControl);
+                // Move it before the layers control
+                 if (layersControl.getContainer() && toggleControl.getContainer().parentNode) {
+                    toggleControl.getContainer().parentNode.insertBefore(toggleControl.getContainer(), layersControl.getContainer());
+                }
+            }
+
 
             // --- ADD DRAWING CONTROLS ---
             const drawnItems = new L.FeatureGroup();
@@ -365,10 +597,15 @@ const InteractiveMap: React.FC<InteractiveMapProps> = ({ location, isNdviVisible
 
                 let popupContent = 'Shape added!';
                 if (layer instanceof L.Polygon || layer instanceof L.Rectangle) {
-                    const area = L.GeometryUtil.geodesicArea((layer as L.Polygon).getLatLngs()[0]);
-                    const areaHectares = (area / 10000).toFixed(2);
-                    const areaAcres = (area / 4046.86).toFixed(2);
-                    popupContent = `<b>Area</b><br>${areaHectares} hectares<br>${areaAcres} acres`;
+                    const latlngs = (layer as L.Polygon).getLatLngs();
+                    if (latlngs && latlngs[0] && latlngs[0].length > 2) {
+                        const area = L.GeometryUtil.geodesicArea(latlngs[0]);
+                        const areaHectares = (area / 10000).toFixed(2);
+                        const areaAcres = (area / 4046.86).toFixed(2);
+                        popupContent = `<b>Area</b><br>${areaHectares} hectares<br>${areaAcres} acres`;
+                    } else {
+                        popupContent = `<b>Polygon Added</b><br>Area calculation failed.`;
+                    }
                 } else if (layer instanceof L.Polyline) {
                     const latlngs = (layer as L.Polyline).getLatLngs() as L.LatLng[];
                     let distance = 0;
@@ -394,11 +631,42 @@ const InteractiveMap: React.FC<InteractiveMapProps> = ({ location, isNdviVisible
             map.on('overlayremove', (e: L.LayersControlEvent) => {
                 if (e.name === 'Soil Moisture') setShowSoilMoisture(false);
             });
-             map.on('click', () => {
+             map.on('click', (e: L.LeafletMouseEvent) => {
+                // Ignore clicks on interactive layers (like polygons or markers)
+                if ((e.originalEvent.target as HTMLElement).closest('.leaflet-interactive, .leaflet-control')) {
+                    return;
+                }
                 setSelectedPlot(null);
+                handlePointAnalysis(e.latlng);
             });
         }
-    }, []);
+    }, [showControls]);
+
+    // Effect to generate rainfall data when location is available
+    useEffect(() => {
+        if (location && !rainfallGeoJson) {
+            setRainfallGeoJson(generateRainfallData(location));
+        }
+    }, [location, rainfallGeoJson]);
+
+    // Effect to control rainfall layer visibility
+    useEffect(() => {
+        const map = mapRef.current;
+        const layer = rainfallLayerRef.current;
+        if (!map || !layer) return;
+
+        if (isRainfallVisible && rainfallGeoJson) {
+            layer.clearLayers().addData(rainfallGeoJson);
+            if (!map.hasLayer(layer)) {
+                map.addLayer(layer);
+                layer.bringToBack();
+            }
+        } else {
+            if (map.hasLayer(layer)) {
+                map.removeLayer(layer);
+            }
+        }
+    }, [isRainfallVisible, rainfallGeoJson]);
 
     // Effect to update farm data and styles when props change
     useEffect(() => {
@@ -480,7 +748,19 @@ const InteractiveMap: React.FC<InteractiveMapProps> = ({ location, isNdviVisible
         <div className="relative h-full w-full">
             <div ref={mapContainerRef} className="h-full w-full" />
             <BottomSheet plot={selectedPlot} onClose={() => setSelectedPlot(null)} />
-            <MapLegend showNdvi={isNdviVisible} showSoilMoisture={showSoilMoisture} />
+             <PointAnalysisSheet 
+                analysis={analysisPoint} 
+                isLoading={isPointAnalyzing} 
+                onClose={() => {
+                    setAnalysisPoint(null);
+                    analysisMarkerRef.current?.remove();
+                }} 
+            />
+            <MapLegend 
+                showNdvi={isNdviVisible} 
+                showSoilMoisture={showSoilMoisture}
+                showRainfall={isRainfallVisible} 
+            />
         </div>
     );
 };

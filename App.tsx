@@ -1,5 +1,6 @@
 
 
+
 import React, { useState, useEffect, useMemo } from 'react';
 
 import Login from './components/Login';
@@ -13,6 +14,7 @@ import GeoAIAssistant from './components/GeoAIAssistant';
 import LiveAssistant from './components/LiveAssistant';
 import Analytics from './components/Analytics';
 import IconButton from './components/common/IconButton';
+import EmpathyPage from './components/EmpathyPage';
 
 import { AgriSenseLogo, UserIcon as ProfileIcon, HamburgerMenuIcon } from './components/Icons';
 
@@ -24,22 +26,22 @@ const initialFarmGeoData = {
     "features": [
         { 
             "type": "Feature", 
-            "properties": { "name": "Wheat Field A", "crop": "Wheat", "ndvi": 0.92, "soil_moisture": "Optimal" }, 
+            "properties": { "name": "Wheat Field A", "crop": "Wheat", "ndvi": 0.92, "soil_moisture": "Optimal", "soil_type": "Loamy Sand", "soil_ph": 6.8 }, 
             "geometry": { "type": "Polygon", "coordinates": [ [ [ -0.09, 51.509 ], [ -0.09, 51.512 ], [ -0.08, 51.512 ], [ -0.08, 51.509 ], [ -0.09, 51.509 ] ] ] } 
         },
         { 
             "type": "Feature", 
-            "properties": { "name": "Corn Plot 3", "crop": "Corn", "ndvi": 0.85, "soil_moisture": "Optimal" }, 
+            "properties": { "name": "Corn Plot 3", "crop": "Corn", "ndvi": 0.85, "soil_moisture": "Optimal", "soil_type": "Silty Clay", "soil_ph": 7.1 }, 
             "geometry": { "type": "Polygon", "coordinates": [ [ [ -0.07, 51.51 ], [ -0.07, 51.513 ], [ -0.06, 51.513 ], [ -0.06, 51.51 ], [ -0.07, 51.51 ] ] ] } 
         },
         { 
             "type": "Feature", 
-            "properties": { "name": "Soybean Field", "crop": "Soybean", "ndvi": 0.60, "soil_moisture": "Dry" }, 
+            "properties": { "name": "Soybean Field", "crop": "Soybean", "ndvi": 0.60, "soil_moisture": "Dry", "soil_type": "Sandy Loam", "soil_ph": 6.5 }, 
             "geometry": { "type": "Polygon", "coordinates": [ [ [ -0.09, 51.505 ], [ -0.09, 51.507 ], [ -0.08, 51.507 ], [ -0.08, 51.505 ], [ -0.09, 51.505 ] ] ] } 
         },
         { 
             "type": "Feature", 
-            "properties": { "name": "Vineyard", "crop": "Vineyard", "ndvi": 0.78, "soil_moisture": "Wet" }, 
+            "properties": { "name": "Vineyard", "crop": "Vineyard", "ndvi": 0.78, "soil_moisture": "Wet", "soil_type": "Clay Loam", "soil_ph": 7.5 }, 
             "geometry": { "type": "Polygon", "coordinates": [ [ [ -0.07, 51.505 ], [ -0.07, 51.507 ], [ -0.06, 51.507 ], [ -0.06, 51.505 ], [ -0.07, 51.505 ] ] ] } 
         }
     ]
@@ -58,12 +60,17 @@ const simulateFarmDataUpdate = (prevData: typeof initialFarmGeoData) => {
             ? moistureLevels[Math.floor(Math.random() * 3)] 
             : feature.properties.soil_moisture;
 
+        // Slightly adjust pH value
+        const phChange = (Math.random() - 0.5) * 0.1;
+        const newPh = Math.max(5.0, Math.min(8.5, (feature.properties.soil_ph || 7.0) + phChange));
+
         return {
             ...feature,
             properties: {
                 ...feature.properties,
                 ndvi: parseFloat(newNdvi.toFixed(2)),
                 soil_moisture: newMoisture,
+                soil_ph: parseFloat(newPh.toFixed(1)),
             }
         };
     });
@@ -136,6 +143,7 @@ const AppHeader: React.FC<{page: Page}> = ({ page }) => {
 
 
 const App: React.FC = () => {
+  const [showEmpathyPage, setShowEmpathyPage] = useState(true);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [activePage, setActivePage] = useState<Page>('Dashboard');
   const [location, setLocation] = useState<LocationState>(null);
@@ -194,11 +202,33 @@ const App: React.FC = () => {
   }, [farmGeoData]);
 
 
-  if (!isLoggedIn) {
-    return <Login onLogin={() => setIsLoggedIn(true)} />;
+  const isMapView = activePage === 'Map' && isLoggedIn && !showEmpathyPage;
+
+  let content;
+  if (showEmpathyPage) {
+    content = <EmpathyPage onStart={() => setShowEmpathyPage(false)} />;
+  } else if (!isLoggedIn) {
+    content = <Login onLogin={() => setIsLoggedIn(true)} />;
+  } else {
+    content = (
+      <>
+        {activePage !== 'Chat' && activePage !== 'Live' && activePage !== 'Analytics' && <AppHeader page={activePage} />}
+        <main className={`flex-grow ${isMapView ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+          <PageContent 
+            activePage={activePage} 
+            setPage={setActivePage} 
+            location={location}
+            farmGeoData={farmGeoData}
+            farmSummary={farmSummary}
+            lastUpdated={lastUpdated}
+          />
+        </main>
+        {activePage !== 'Chat' && activePage !== 'Live' && activePage !== 'Analytics' && (
+            <BottomNav activePage={activePage} setPage={setActivePage} />
+        )}
+      </>
+    );
   }
-  
-  const isMapView = activePage === 'Map';
 
   return (
     <div className={`w-full min-h-screen bg-gray-200 dark:bg-black font-sans ${!isMapView && 'flex items-center justify-center p-0 sm:p-4'}`}>
@@ -206,24 +236,7 @@ const App: React.FC = () => {
             ? "w-full h-screen bg-gray-50 dark:bg-gray-900 flex flex-col" 
             : "w-full max-w-md lg:max-w-lg xl:max-w-xl h-screen sm:h-[90vh] sm:max-h-[800px] bg-gray-50 dark:bg-gray-900 shadow-2xl sm:rounded-3xl flex flex-col overflow-hidden"
         }>
-        
-            {activePage !== 'Chat' && activePage !== 'Live' && activePage !== 'Analytics' && <AppHeader page={activePage} />}
-            
-            <main className={`flex-grow ${isMapView ? 'overflow-hidden' : 'overflow-y-auto'}`}>
-              <PageContent 
-                activePage={activePage} 
-                setPage={setActivePage} 
-                location={location}
-                farmGeoData={farmGeoData}
-                farmSummary={farmSummary}
-                lastUpdated={lastUpdated}
-              />
-            </main>
-            
-            {activePage !== 'Chat' && activePage !== 'Live' && activePage !== 'Analytics' && (
-                <BottomNav activePage={activePage} setPage={setActivePage} />
-            )}
-
+            {content}
         </div>
     </div>
   );
