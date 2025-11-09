@@ -11,6 +11,9 @@
   "dependencies": {
     "react": "^19.2.0",
     "leaflet": "1.9.4",
+    "leaflet-geosearch": "3.11.0",
+    "leaflet.fullscreen": "2.4.0",
+    "leaflet-draw": "1.0.4",
     "react-dom": "^19.2.0",
     "@google/genai": "^1.27.0"
   },

@@ -1,6 +1,5 @@
-
 <!DOCTYPE html>
-<html lang="hi">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
@@ -8,6 +7,9 @@
     <title>AgriSense AI – GeoAI for Smart Agriculture</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-geosearch@3.11.0/dist/geosearch.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.fullscreen@2.4.0/dist/leaflet.fullscreen.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
     <style>
       @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap');
       body {
@@ -17,6 +19,142 @@
         height: 100%;
         width: 100%;
       }
+      /* Custom marker for user's location */
+      .user-location-marker {
+        position: relative;
+        background-color: white; /* The outer ring */
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+      }
+      .user-location-marker::before {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 10px;
+        height: 10px;
+        transform: translate(-50%, -50%);
+        background-color: #3b82f6; /* The inner blue dot */
+        border-radius: 50%;
+      }
+      .user-location-marker::after {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 20px; /* same size as parent */
+        height: 20px;
+        border-radius: 50%;
+        background-color: rgba(59, 130, 246, 0.2); /* The pulse */
+        animation: pulse 2s infinite ease-out;
+        transform: translate(-50%, -50%);
+        z-index: -1;
+      }
+      @keyframes pulse {
+        0% {
+          transform: translate(-50%, -50%) scale(0.8);
+          opacity: 0.7;
+        }
+        100% {
+          transform: translate(-50%, -50%) scale(3);
+          opacity: 0;
+        }
+      }
+      
+      /* Custom Map Controls */
+      .leaflet-control-custom {
+          background-color: white;
+          border: 2px solid rgba(0,0,0,0.2);
+          border-radius: 4px;
+          width: 34px;
+          height: 34px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+      }
+      .leaflet-control-custom:hover {
+          background-color: #f4f4f4;
+      }
+      .leaflet-fab {
+        width: 44px !important;
+        height: 44px !important;
+        border-radius: 50% !important;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+      }
+      .leaflet-fab svg {
+        width: 22px;
+        height: 22px;
+      }
+      .dark .leaflet-control-custom {
+          background-color: #374151; /* gray-700 */
+          color: #f3f4f6;
+          border-color: #4b5563;
+      }
+      .dark .leaflet-control-custom:hover {
+          background-color: #4b5563;
+      }
+      
+      /* Dark Mode for GeoSearch */
+      .dark .leaflet-geosearch-bar {
+          background-color: #374151; /* gray-700 */
+          border: 1px solid #4b5563; /* gray-600 */
+      }
+      .dark .leaflet-geosearch-bar input {
+          color: #f3f4f6; /* gray-100 */
+          background-color: transparent;
+      }
+      .dark .leaflet-geosearch-bar input::placeholder {
+          color: #9ca3af; /* gray-400 */
+      }
+      .dark .leaflet-geosearch-bar .results {
+          background-color: #374151; /* gray-700 */
+          border: 1px solid #4b5563; /* gray-600 */
+      }
+      .dark .leaflet-geosearch-bar .results > * {
+          border-bottom-color: #4b5563; /* gray-600 */
+      }
+      .dark .leaflet-geosearch-bar .results > .active, .dark .leaflet-geosearch-bar .results > *:hover {
+          background-color: #4b5563; /* gray-600 */
+          color: white;
+      }
+
+      /* Dark Mode for Leaflet Draw */
+      .dark .leaflet-draw-toolbar {
+          background-color: #374151;
+          border: 1px solid #4b5563;
+      }
+      .dark .leaflet-draw-toolbar a {
+          background-color: #374151;
+          color: #f3f4f6;
+      }
+      .dark .leaflet-draw-toolbar a:hover {
+          background-color: #4b5563;
+      }
+      .dark .leaflet-draw-actions li a {
+          background-color: #4b5563;
+      }
+      .dark .leaflet-draw-actions li a:hover {
+          background-color: #556270;
+      }
+      .dark .leaflet-draw-tooltip {
+          background-color: #374151;
+          color: #f3f4f6;
+          border-color: #4b5563;
+      }
+      
+      /* For the bottom sheet handle */
+      .bottom-sheet-handle {
+          width: 40px;
+          height: 4px;
+          border-radius: 2px;
+          background-color: #d1d5db; /* gray-300 */
+      }
+      .dark .bottom-sheet-handle {
+          background-color: #4b5563; /* gray-600 */
+      }
     </style>
   <script type="importmap">
 {
@@ -25,7 +163,10 @@
     "react/jsx-runtime": "https://esm.sh/react@18.3.1/jsx-runtime",
     "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
     "react-dom/server": "https://esm.sh/react-dom@18.3.1/server",
-    "leaflet": "https://unpkg.com/leaflet@1.9.4/dist/leaflet-src.esm.js",
+    "leaflet": "https://esm.sh/leaflet@1.9.4",
+    "leaflet-geosearch": "https://esm.sh/leaflet-geosearch@3.11.0",
+    "leaflet.fullscreen": "https://esm.sh/leaflet.fullscreen@2.4.0",
+    "leaflet-draw": "https://esm.sh/leaflet-draw@1.0.4",
     "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
     "react/": "https://aistudiocdn.com/react@^19.2.0/",
     "@google/genai": "https://aistudiocdn.com/@google/genai@^1.27.0"
